@@ -14,7 +14,9 @@ find_package(glm CONFIG REQUIRED)
 find_package(OpenGL REQUIRED)
 
 # Create executable
-add_executable(${PROJECT_NAME} src/main.cpp)
+add_executable(${PROJECT_NAME} 
+src/main.cpp
+src/InitShader.cpp)
 
 # Add include directory
 target_include_directories(${PROJECT_NAME} PRIVATE 

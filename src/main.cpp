@@ -3,6 +3,14 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
+#include "Angel.h"
+
+const int SCREEN_WIDTH = 800;
+const int SCREEN_HEIGHT = 600;
+
+GLuint mainShaderProgram;
+GLuint vbo, vao;
+
 
 // Error callback for GLFW
 void errorCallback(int error, const char* description) {
@@ -14,6 +22,30 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
         glfwSetWindowShouldClose(window, GLFW_TRUE);
     }
+}
+
+
+void init(){
+    float initPos[2] = {0.0f, 0.0f};
+
+    mainShaderProgram = InitShader("D:/fluidmechanicssimulation/shaders/vertex.glsl",
+                               "D:/fluidmechanicssimulation/shaders/fragment.glsl");
+
+    glGenVertexArrays(1, &vao);
+    glBindVertexArray(vao);
+
+    glGenBuffers(1, &vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(initPos), initPos, GL_STATIC_DRAW);
+
+
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2*sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+
+    glEnable(GL_PROGRAM_POINT_SIZE);
+
+
+
 }
 
 int main() {
@@ -66,21 +98,31 @@ int main() {
 
     // Enable depth testing
     glEnable(GL_DEPTH_TEST);
-
+    init();
     // Main loop
     while (!glfwWindowShouldClose(window)) {
         // Clear the screen
         glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // Your rendering code here
+        // rendering code starts
+
+        glUseProgram(mainShaderProgram);
+        GLint loc = glGetUniformLocation(mainShaderProgram, "uPointSize");
+        glUniform1f(loc, 24.0f);
+
+        glBindVertexArray(vao);
+        glDrawArrays(GL_POINTS, 0,1);
+        // rendering code ends
 
         // Swap buffers and poll events
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
-
     // Cleanup
+    glDeleteBuffers(1, &vbo);
+    glDeleteVertexArrays(1, &vao);
+    glDeleteProgram(mainShaderProgram);
     glfwDestroyWindow(window);
     glfwTerminate();
 
