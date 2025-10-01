@@ -16,6 +16,12 @@ find_package(OpenGL REQUIRED)
 # Create executable
 add_executable(${PROJECT_NAME} src/main.cpp)
 
+# Add include directory
+target_include_directories(${PROJECT_NAME} PRIVATE 
+    ${CMAKE_SOURCE_DIR}/include
+)
+
+
 # Link libraries
 target_link_libraries(${PROJECT_NAME} PRIVATE 
     glfw
