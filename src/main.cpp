@@ -15,7 +15,12 @@ const int SCREEN_WIDTH = 800;
 const int SCREEN_HEIGHT = 600;
 
 GLuint mainShaderProgram;
+GLuint presentProgram;
+GLuint presentVAO;
 GLuint vbo, vao;
+GLuint fbo;
+GLuint texture;
+GLuint depthTexture;
 
 // about points 
 const int N = 2000;
@@ -37,11 +42,49 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
     }
 }
 
+void createFBO(){
+    glGenFramebuffers(1, &fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
+
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, SCREEN_WIDTH, SCREEN_HEIGHT, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+
+
+    // depth texture for now
+    glGenTextures(1, &depthTexture);
+    glBindTexture(GL_TEXTURE_2D, depthTexture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, SCREEN_WIDTH, SCREEN_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT,nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthTexture, 0);
+
+    GLenum bufs[1] = { GL_COLOR_ATTACHMENT0 };
+    glDrawBuffers(1, bufs);
+
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        std::cerr << "FBO incomplete!\n";
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+}
+
 
 void init(){
     // absolute path since we are in D
     mainShaderProgram = InitShader("D:/fluidmechanicssimulation/shaders/vertex.glsl",
                                "D:/fluidmechanicssimulation/shaders/fragment.glsl");
+    presentProgram = InitShader("D:/fluidmechanicssimulation/shaders/presentv.glsl",
+                               "D:/fluidmechanicssimulation/shaders/presentf.glsl");
+        glGenVertexArrays(1, &presentVAO);
 
 
     std::mt19937 rng(42);
@@ -140,6 +183,10 @@ int main() {
 
     GLuint uPointSize = glGetUniformLocation(mainShaderProgram, "uPointSize");
     GLuint uMVP = glGetUniformLocation(mainShaderProgram, "uMVP");
+
+    int fbw, fbh;
+    glfwGetFramebufferSize(window, &fbw, &fbh);
+    createFBO();
     // Main loop
     while (!glfwWindowShouldClose(window)) {
 
@@ -190,21 +237,56 @@ int main() {
 
 
          // --- stream new positions to GPU ---
-        glBindBuffer(GL_ARRAY_BUFFER, vbo);
-        glBufferSubData(GL_ARRAY_BUFFER, 0, pos.size()*sizeof(float), pos.data());
 
-        // --- draw ---
+
+
+        // glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        // glBufferSubData(GL_ARRAY_BUFFER, 0, pos.size()*sizeof(float), pos.data());
+
+        // // --- draw ---
+        // glEnable(GL_DEPTH_TEST);
+        // glDepthFunc(GL_LESS);
+
+        // glClearColor(0.07f, 0.07f, 0.09f, 1.0f);
+        // glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        // glUseProgram(mainShaderProgram);
+        // glUniform1f(uPointSize, 6.0f); 
+        // glUniformMatrix4fv(uMVP, 1, GL_TRUE, mvp);
+        // glBindVertexArray(vao);
+        // glDrawArrays(GL_POINTS, 0, N);
+
+        // 3.1 — Render particles into the offscreen FBO
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
         glEnable(GL_DEPTH_TEST);
         glDepthFunc(GL_LESS);
-
-        glClearColor(0.07f, 0.07f, 0.09f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+
         glUseProgram(mainShaderProgram);
-        glUniform1f(uPointSize, 6.0f); 
-        glUniformMatrix4fv(uMVP, 1, GL_TRUE, mvp);
+        glUniform1f(uPointSize, 6.0f);
+        glUniformMatrix4fv(uMVP, 1, GL_TRUE, &mvp[0][0]); // or GL_FALSE if that’s what worked for you
+
         glBindVertexArray(vao);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, pos.size()*sizeof(float), pos.data());
         glDrawArrays(GL_POINTS, 0, N);
+
+        // 3.2 — Present the offscreen color to the window
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, fbw, fbh);   // back to window size
+        glDisable(GL_DEPTH_TEST);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        glUseProgram(presentProgram);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glUniform1i(glGetUniformLocation(presentProgram, "uTex"), 0);
+
+        glBindVertexArray(presentVAO);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+
 
 
         glfwSwapBuffers(window);
