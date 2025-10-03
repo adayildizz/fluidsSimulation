@@ -42,14 +42,14 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
     }
 }
 
-void createFBO(){
+void createFBO(int w, int h){
     glGenFramebuffers(1, &fbo);
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
 
     glGenTextures(1, &texture);
     glBindTexture(GL_TEXTURE_2D, texture);
 
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, SCREEN_WIDTH, SCREEN_HEIGHT, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -62,7 +62,7 @@ void createFBO(){
     // depth texture for now
     glGenTextures(1, &depthTexture);
     glBindTexture(GL_TEXTURE_2D, depthTexture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, SCREEN_WIDTH, SCREEN_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT,nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, w, h, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT,nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthTexture, 0);
@@ -186,7 +186,7 @@ int main() {
 
     int fbw, fbh;
     glfwGetFramebufferSize(window, &fbw, &fbh);
-    createFBO();
+    createFBO(fbw, fbh);
     // Main loop
     while (!glfwWindowShouldClose(window)) {
 
@@ -258,7 +258,7 @@ int main() {
 
         // 3.1 — Render particles into the offscreen FBO
         glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-        glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+        glViewport(0, 0, fbw, fbh);
         glEnable(GL_DEPTH_TEST);
         glDepthFunc(GL_LESS);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -275,7 +275,7 @@ int main() {
 
         // 3.2 — Present the offscreen color to the window
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glViewport(0, 0, fbw, fbh);   // back to window size
+        glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);   // back to window size
         glDisable(GL_DEPTH_TEST);
         glClear(GL_COLOR_BUFFER_BIT);
 
