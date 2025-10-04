@@ -21,6 +21,7 @@ GLuint vbo, vao;
 GLuint fbo;
 GLuint texture;
 GLuint depthTexture;
+GLuint eyeDepthTex = 0;
 
 // about points 
 const int N = 2000;
@@ -53,13 +54,21 @@ void createFBO(int w, int h){
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
 
+    // eye-space depth (float)
+    glGenTextures(1, &eyeDepthTex);
+    glBindTexture(GL_TEXTURE_2D, eyeDepthTex);
+    // Here gl_r32f is important
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, w, h, 0, GL_RED, GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D,eyeDepthTex, 0);
 
-    // depth texture for now
+    // depth test attachment 
     glGenTextures(1, &depthTexture);
     glBindTexture(GL_TEXTURE_2D, depthTexture);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, w, h, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT,nullptr);
@@ -67,8 +76,8 @@ void createFBO(int w, int h){
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthTexture, 0);
 
-    GLenum bufs[1] = { GL_COLOR_ATTACHMENT0 };
-    glDrawBuffers(1, bufs);
+    GLenum bufs[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+    glDrawBuffers(2, bufs);
 
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
         std::cerr << "FBO incomplete!\n";
@@ -181,8 +190,12 @@ int main() {
     const float bounce = 0.6f;
     const float drag = 0.999f;
 
-    GLuint uPointSize = glGetUniformLocation(mainShaderProgram, "uPointSize");
-    GLuint uMVP = glGetUniformLocation(mainShaderProgram, "uMVP");
+    GLint uModelLoc       = glGetUniformLocation(mainShaderProgram, "uModel");
+    GLint uViewLoc        = glGetUniformLocation(mainShaderProgram, "uView");
+    GLint uProjLoc        = glGetUniformLocation(mainShaderProgram, "uProj");
+    GLint uSphereRadius   = glGetUniformLocation(mainShaderProgram, "uSphereRadius");
+    GLint uPointScaleLoc  = glGetUniformLocation(mainShaderProgram, "uPointScale");
+
 
     int fbw, fbh;
     glfwGetFramebufferSize(window, &fbw, &fbh);
@@ -221,52 +234,33 @@ int main() {
             if (z > zmax) { z = zmax - (z - zmax); vz = -vz * bounce; }
         }
 
+
         mat4 model = mat4(1.0f);
-        mat4 view = LookAt(
-            vec4(0.0f, 0.5f, 3.0f, 1.0f),
-            vec4(0.0f,0.0f,0.0f, 1.0f),
-            vec4(0.0f, 1.0f,0.0f, 0.0f));
+        vec4 eye = vec4(0.0f, 0.5f, 3.0f, 1.0f);
+        vec4 at  = vec4(0.0f, 0.0f, 0.0f, 1.0f);
+        vec4 up  = vec4(0.0f, 1.0f, 0.0f, 0.0f);
+        mat4 view = LookAt(eye, at, up);
 
-        int fbw, fbh;
-        glfwGetFramebufferSize(window, &fbw, &fbh);
-        float aspect = (fbw > 0 && fbh > 0) ? float(fbw)/float(fbh) : 1.0f;
+        int fbw, fbh; glfwGetFramebufferSize(window, &fbw, &fbh);
+        float aspect = (fbw>0 && fbh>0) ? float(fbw)/float(fbh) : 1.0f;
+        float fovY   = 45.0f;
+        mat4 proj = Perspective(fovY, aspect, 0.1f, 100.0f);
 
-        mat4 proj = Perspective(45.0, aspect, 0.1f, 100.0f);
-        mat4 mvp = proj * view * model;
+        // pointScale = framebufferHeight / (2 * tan(fovY/2))
+        float pointScale = fbh / (2.0f * std::tan(fovY * 3.14159265f / 180.0f * 0.5f));
 
+        // sphere radius in world units (tweak visually)
+        float sphereRadius = 0.04f;
 
-
-         // --- stream new positions to GPU ---
-
-
-
-        // glBindBuffer(GL_ARRAY_BUFFER, vbo);
-        // glBufferSubData(GL_ARRAY_BUFFER, 0, pos.size()*sizeof(float), pos.data());
-
-        // // --- draw ---
-        // glEnable(GL_DEPTH_TEST);
-        // glDepthFunc(GL_LESS);
-
-        // glClearColor(0.07f, 0.07f, 0.09f, 1.0f);
-        // glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-        // glUseProgram(mainShaderProgram);
-        // glUniform1f(uPointSize, 6.0f); 
-        // glUniformMatrix4fv(uMVP, 1, GL_TRUE, mvp);
-        // glBindVertexArray(vao);
-        // glDrawArrays(GL_POINTS, 0, N);
-
-        // 3.1 — Render particles into the offscreen FBO
-        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-        glViewport(0, 0, fbw, fbh);
-        glEnable(GL_DEPTH_TEST);
-        glDepthFunc(GL_LESS);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-
+        // Upload
         glUseProgram(mainShaderProgram);
-        glUniform1f(uPointSize, 6.0f);
-        glUniformMatrix4fv(uMVP, 1, GL_TRUE, &mvp[0][0]); // or GL_FALSE if that’s what worked for you
+        glUniformMatrix4fv(uModelLoc, 1, GL_TRUE, &model[0][0]);
+        glUniformMatrix4fv(uViewLoc,  1, GL_TRUE, &view[0][0]);
+        glUniformMatrix4fv(uProjLoc,  1, GL_TRUE, &proj[0][0]);
+        glUniform1f(uSphereRadius, sphereRadius);
+        glUniform1f(uPointScaleLoc, pointScale);
+
+
 
         glBindVertexArray(vao);
         glBindBuffer(GL_ARRAY_BUFFER, vbo);
@@ -274,18 +268,34 @@ int main() {
         glDrawArrays(GL_POINTS, 0, N);
 
         // 3.2 — Present the offscreen color to the window
+      // Render to offscreen
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        glViewport(0, 0, fbw, fbh);
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LESS);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        glUseProgram(mainShaderProgram);
+        // (upload the uniforms as shown above)
+
+        glBindVertexArray(vao);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, pos.size()*sizeof(float), pos.data());
+        glDrawArrays(GL_POINTS, 0, N);
+
+        // Present to window (as you already do)
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);   // back to window size
+        glViewport(0, 0, fbw, fbh);
         glDisable(GL_DEPTH_TEST);
         glClear(GL_COLOR_BUFFER_BIT);
 
         glUseProgram(presentProgram);
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, texture);
+        glBindTexture(GL_TEXTURE_2D, texture); // COLOR0 from FBO
         glUniform1i(glGetUniformLocation(presentProgram, "uTex"), 0);
-
         glBindVertexArray(presentVAO);
         glDrawArrays(GL_TRIANGLES, 0, 3);
+
 
 
 
