@@ -23,6 +23,12 @@ GLuint texture;
 GLuint depthTexture;
 GLuint eyeDepthTex = 0;
 
+// for biliteral blur 
+GLuint depthBlurTexA = 0, depthBlurTexB = 0;
+GLuint fboBlurA = 0, fboBlurB = 0;
+GLuint blurProgram = 0;
+
+
 // about points 
 const int N = 2000;
 std::vector<float> pos(N*3);
@@ -86,6 +92,44 @@ void createFBO(int w, int h){
 
 }
 
+void createBlurTargets(int w, int h) {
+    // clean up if re-creating
+    if (depthBlurTexA) { glDeleteTextures(1, &depthBlurTexA); depthBlurTexA = 0; }
+    if (depthBlurTexB) { glDeleteTextures(1, &depthBlurTexB); depthBlurTexB = 0; }
+    if (fboBlurA)      { glDeleteFramebuffers(1, &fboBlurA);  fboBlurA = 0;      }
+    if (fboBlurB)      { glDeleteFramebuffers(1, &fboBlurB);  fboBlurB = 0;      }
+
+    glGenTextures(1, &depthBlurTexA);
+    glBindTexture(GL_TEXTURE_2D, depthBlurTexA);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, w, h, 0, GL_RED, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    glGenTextures(1, &depthBlurTexB);
+    glBindTexture(GL_TEXTURE_2D, depthBlurTexB);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, w, h, 0, GL_RED, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    glGenFramebuffers(1, &fboBlurA);
+    glBindFramebuffer(GL_FRAMEBUFFER, fboBlurA);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, depthBlurTexA, 0);
+    GLenum bufsA[1] = { GL_COLOR_ATTACHMENT0 };
+    glDrawBuffers(1, bufsA);
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        std::cerr << "fboBlurA incomplete!\n";
+
+    glGenFramebuffers(1, &fboBlurB);
+    glBindFramebuffer(GL_FRAMEBUFFER, fboBlurB);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, depthBlurTexB, 0);
+    GLenum bufsB[1] = { GL_COLOR_ATTACHMENT0 };
+    glDrawBuffers(1, bufsB);
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        std::cerr << "fboBlurB incomplete!\n";
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
 
 void init(){
     // absolute path since we are in D
@@ -93,6 +137,10 @@ void init(){
                                "D:/fluidmechanicssimulation/shaders/fragment.glsl");
     presentProgram = InitShader("D:/fluidmechanicssimulation/shaders/presentv.glsl",
                                "D:/fluidmechanicssimulation/shaders/presentf.glsl");
+
+    blurProgram = InitShader("D:/fluidmechanicssimulation/shaders/biliteralv.glsl",
+                         "D:/fluidmechanicssimulation/shaders/biliteralf.glsl");
+
         glGenVertexArrays(1, &presentVAO);
 
 
@@ -200,6 +248,7 @@ int main() {
     int fbw, fbh;
     glfwGetFramebufferSize(window, &fbw, &fbh);
     createFBO(fbw, fbh);
+    createBlurTargets(fbw, fbh);
     // Main loop
     while (!glfwWindowShouldClose(window)) {
 
@@ -273,7 +322,13 @@ int main() {
         glViewport(0, 0, fbw, fbh);
         glEnable(GL_DEPTH_TEST);
         glDepthFunc(GL_LESS);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        // Clear color0 and color1 to 0, and depth to 1
+        const float zero[4] = {0,0,0,0};
+        glClearBufferfv(GL_COLOR, 0, zero); // colorTex
+        glClearBufferfv(GL_COLOR, 1, zero); // eyeDepthTex (R32F)
+        glClear(GL_DEPTH_BUFFER_BIT);
+
 
         glUseProgram(mainShaderProgram);
         // (upload the uniforms as shown above)
@@ -282,6 +337,44 @@ int main() {
         glBindBuffer(GL_ARRAY_BUFFER, vbo);
         glBufferSubData(GL_ARRAY_BUFFER, 0, pos.size()*sizeof(float), pos.data());
         glDrawArrays(GL_POINTS, 0, N);
+
+        // ---- Bilateral blur H pass (eyeDepthTex -> depthBlurTexA) ----
+glDisable(GL_DEPTH_TEST);
+glBindFramebuffer(GL_FRAMEBUFFER, fboBlurA);
+glViewport(0, 0, fbw, fbh);
+glUseProgram(blurProgram);
+
+glActiveTexture(GL_TEXTURE0);
+glBindTexture(GL_TEXTURE_2D, eyeDepthTex);
+glUniform1i(glGetUniformLocation(blurProgram, "uDepth"), 0);
+
+glUniform2f(glGetUniformLocation(blurProgram, "uTexel"), 1.0f/fbw, 1.0f/fbh);
+glUniform2f(glGetUniformLocation(blurProgram, "uDir"),   1.0f, 0.0f); // horizontal
+glUniform1i(glGetUniformLocation(blurProgram, "uRadius"), 8);         // try 6..12
+glUniform1f(glGetUniformLocation(blurProgram, "uSigmaSpatial"), 3.0f);
+glUniform1f(glGetUniformLocation(blurProgram, "uSigmaRange"),   0.15f); // tune later
+
+glBindVertexArray(presentVAO);
+glDrawArrays(GL_TRIANGLES, 0, 3);
+
+// ---- Bilateral blur V pass (depthBlurTexA -> depthBlurTexB) ----
+glBindFramebuffer(GL_FRAMEBUFFER, fboBlurB);
+glViewport(0, 0, fbw, fbh);
+glUseProgram(blurProgram);
+
+glActiveTexture(GL_TEXTURE0);
+glBindTexture(GL_TEXTURE_2D, depthBlurTexA);
+glUniform1i(glGetUniformLocation(blurProgram, "uDepth"), 0);
+
+glUniform2f(glGetUniformLocation(blurProgram, "uTexel"), 1.0f/fbw, 1.0f/fbh);
+glUniform2f(glGetUniformLocation(blurProgram, "uDir"),   0.0f, 1.0f); // vertical
+glUniform1i(glGetUniformLocation(blurProgram, "uRadius"), 8);
+glUniform1f(glGetUniformLocation(blurProgram, "uSigmaSpatial"), 3.0f);
+glUniform1f(glGetUniformLocation(blurProgram, "uSigmaRange"),   0.15f);
+
+glBindVertexArray(presentVAO);
+glDrawArrays(GL_TRIANGLES, 0, 3);
+
 
         // Present to window (as you already do)
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
